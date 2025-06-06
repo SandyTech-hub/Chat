@@ -301,6 +301,8 @@ LOGIN_TEMPLATE = '''
     <input name="password" type="password" placeholder="Password (admin only)" required><br>
     <button type="submit">Login</button>
 </form>
+<br>
+<a href="/chat" style="color: #2a9df4;">Back to Chat</a>
 '''
 
 REGISTER_TEMPLATE = '''
@@ -311,6 +313,8 @@ REGISTER_TEMPLATE = '''
     <input name="phone" placeholder="Phone"><br>
     <button type="submit">Register</button>
 </form>
+<br>
+<a href="/chat" style="color: #2a9df4;">Back to Chat</a>
 '''
 
 PREFERENCES_TEMPLATE = '''
@@ -354,18 +358,112 @@ CHAT_TEMPLATE = '''
 <html>
 <head>
 <title>Chat Chat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-    body { background: #0e0e0e; color: white; font-family: Arial, sans-serif; text-align: center; padding: 20px; }
-    #chat-box { width: 80%; margin: auto; height: 300px; background: #1f1f1f; padding: 10px; overflow-y: auto; border-radius: 8px; border: 1px solid #444; }
-    .message { text-align: left; margin: 5px 0; }
-    .you { color: #81f781; }
-    .stranger { color: #81bef7; }
-    .system { color: #ffa500; font-style: italic; }
-    #typing { font-style: italic; color: #aaa; margin-top: 5px; }
-    .bar { display: flex; justify-content: space-between; align-items: center; width: 80%; margin: 10px auto; }
-    input { flex: 1; padding: 10px; margin: 0 10px; border-radius: 5px; border: 1px solid #555; background-color: #1a1a1a; color: white; }
-    button { padding: 10px 20px; background: #2a9df4; color: white; border: none; border-radius: 5px; cursor: pointer; }
-    button:hover { background: #007acc; }
+    * {
+        box-sizing: border-box;
+    }
+
+    body {
+        background: #0e0e0e;
+        color: white;
+        font-family: Arial, sans-serif;
+        text-align: center;
+        padding: 10px;
+        margin: 0;
+    }
+
+    #chat-box {
+        width: 100%;
+        max-width: 800px;
+        margin: 0 auto;
+        height: 50vh;
+        background: #1f1f1f;
+        padding: 10px;
+        overflow-y: auto;
+        border-radius: 8px;
+        border: 1px solid #444;
+    }
+
+    .message {
+        text-align: left;
+        margin: 5px 0;
+        word-wrap: break-word;
+    }
+
+    .you {
+        color: #81f781;
+    }
+
+    .stranger {
+        color: #81bef7;
+    }
+
+    .system {
+        color: #ffa500;
+        font-style: italic;
+    }
+
+    #typing {
+        font-style: italic;
+        color: #aaa;
+        margin-top: 5px;
+    }
+
+    .bar {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: center;
+        max-width: 800px;
+        margin: 10px auto;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    input {
+        flex: 1;
+        min-width: 50px;
+        padding: 10px;
+        border-radius: 5px;
+        border: 1px solid #555;
+        background-color: #1a1a1a;
+        color: white;
+        font-size: 16px;
+    }
+
+    button {
+        padding: 10px 20px;
+        background: #2a9df4;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+    }
+
+    button:hover {
+        background: #007acc;
+    }
+
+    @media (max-width: 600px) {
+        #chat-box {
+            height: 40vh;
+        }
+
+        .bar {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        input {
+            width: 100%;
+        }
+
+        button {
+            width: 100%;
+        }
+    }
 </style>
 </head>
 <body>
