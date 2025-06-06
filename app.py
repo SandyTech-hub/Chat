@@ -1,11 +1,44 @@
-from flask import Flask, request, session, redirect, render_template_string
+from flask import Flask, request, session, redirect, render_template, render_template_string
 from flask_socketio import SocketIO, emit, join_room, leave_room
+from werkzeug.security import generate_password_hash
 import sqlite3, random, time
 
 app = Flask(__name__)
 app.secret_key = 'your_very_secure_secret'
 socketio = SocketIO(app)
-DB_NAME = 'chatchat.db'
+DB_NAME = 'db.sqlite'
+
+# ---------- Layout Wrapper Function ----------
+def render_with_layout(title, body_html, **kwargs):
+    layout = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>{title}</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+        <style>
+            body {{ padding: 30px; }}
+            nav a {{ margin-right: 15px; }}
+        </style>
+    </head>
+    <body>
+        <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+            <div class="container-fluid">
+                <a class="navbar-brand" href="/admin">Admin Panel</a>
+                <div class="navbar-nav">
+                    <a class="nav-link" href="/admin">Dashboard</a>
+                    <a class="nav-link" href="/admin/users">Users Manage</a>
+                    <a class="nav-link" href="/admin/preferences">Preferences</a>
+                </div>
+            </div>
+        </nav>
+        <div class="container">
+            {body_html}
+        </div>
+    </body>
+    </html>
+    """
+    return render_template_string(layout, **kwargs)
 
 # --- DATABASE INITIALIZATION ---
 def init_db():
@@ -32,9 +65,6 @@ ADMIN_CREDENTIALS = {'username': 'admin', 'password': 'admin123'}
 
 def get_user():
     return session.get('user_id')
-
-def is_admin():
-    return session.get('is_admin', False)
 
 def get_user_preferences(uid):
     with sqlite3.connect(DB_NAME) as conn:
@@ -63,6 +93,7 @@ def match_user_by_preferences(user_prefs, exclude_id=None):
                         continue
                     scores[uid] = scores.get(uid, 0) + 1
         return sorted(scores, key=scores.get, reverse=True)
+
 @app.route('/')
 def home():
     session.clear()  # Restart everything on refresh
@@ -277,9 +308,12 @@ def register():
         username = request.form.get('username')
         email = request.form.get('email')
         phone = request.form.get('phone')
+        password = request.form.get('password')
+        hashed_pw = generate_password_hash(password)
+
         with sqlite3.connect(DB_NAME) as conn:
             c = conn.cursor()
-            c.execute("INSERT INTO users (username, email, phone) VALUES (?, ?, ?)", (username, email, phone))
+            c.execute("INSERT INTO users (username, email, phone, password) VALUES (?, ?, ?, ?)", (username, email, phone, hashed_pw))
             uid = c.lastrowid
             session['user_id'] = uid
         return redirect('/preferences')
@@ -311,21 +345,111 @@ def preferences():
 
         return redirect('/chat')
     suggestions = get_preference_suggestions()
-    return render_template_string(PREFERENCES_TEMPLATE, suggestions=suggestions, extra_class='shake')
+    return render_template_string(BASE_LAYOUT_TEMPLATE, title="Preferences", content=PREFERENCES_TEMPLATE, suggestions=suggestions, extra_class='shake')
 
+# ---------- Admin Check ----------
+def is_admin():
+    return True  # Replace with real authentication
+
+# ---------- Admin Routes ----------
 @app.route('/admin')
-def admin():
+def admin_dashboard():
     if not is_admin():
         return "Unauthorized", 403
     with sqlite3.connect(DB_NAME) as conn:
         c = conn.cursor()
-        c.execute("SELECT username, email, phone FROM users")
+        c.execute("SELECT COUNT(*) FROM users")
+        user_count = c.fetchone()[0]
+        c.execute("SELECT COUNT(DISTINCT user_id) FROM preferences")
+        pref_users = c.fetchone()[0]
+    body = """
+    <h2>Dashboard Overview</h2>
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card text-bg-primary mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">Total Users</h5>
+                    <p class="card-text display-6">{{ user_count }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card text-bg-success mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">Users with Preferences</h5>
+                    <p class="card-text display-6">{{ pref_users }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    """
+    return render_with_layout("Admin Dashboard", body, user_count=user_count, pref_users=pref_users)
+
+@app.route('/admin/users')
+def admin_users():
+    if not is_admin():
+        return "Unauthorized", 403
+    with sqlite3.connect(DB_NAME) as conn:
+        c = conn.cursor()
+        c.execute("SELECT id, username, email, phone FROM users")
         users = c.fetchall()
-        prefs = get_preference_suggestions()
-    return render_template_string(ADMIN_TEMPLATE, users=users, prefs=prefs, extra_class='shake')
-@app.route('/chat')
-def chat():
-    return render_template_string(CHAT_TEMPLATE, user_id=session.get('user_id'), is_admin=is_admin(), extra_class='shake')
+    body = """
+    <h2>User Management</h2>
+    <table class="table table-striped">
+        <thead><tr><th>Username</th><th>Email</th><th>Phone</th><th>Action</th></tr></thead>
+        <tbody>
+        {% for user in users %}
+        <tr>
+            <td>{{ user[1] }}</td>
+            <td>{{ user[2] }}</td>
+            <td>{{ user[3] }}</td>
+            <td>
+                <form action="/admin/delete_user/{{ user[0] }}" method="post" onsubmit="return confirm('Delete this user?');">
+                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    """
+    return render_with_layout("User Management", body, users=users)
+
+@app.route('/admin/delete_user/<int:user_id>', methods=['POST'])
+def delete_user(user_id):
+    if not is_admin():
+        return "Unauthorized", 403
+    with sqlite3.connect(DB_NAME) as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM preferences WHERE user_id=?", (user_id,))
+        c.execute("DELETE FROM users WHERE id=?", (user_id,))
+        conn.commit()
+    return redirect('/admin/users')
+
+@app.route('/admin/preferences')
+def admin_preferences():
+    if not is_admin():
+        return "Unauthorized", 403
+    with sqlite3.connect(DB_NAME) as conn:
+        c = conn.cursor()
+        c.execute("SELECT user_id, category, preference FROM preferences")
+        prefs = c.fetchall()
+    body = """
+    <h2>User Preferences</h2>
+    <table class="table table-bordered">
+        <thead><tr><th>User ID</th><th>Preference Key</th><th>Value</th></tr></thead>
+        <tbody>
+        {% for p in prefs %}
+        <tr>
+            <td>{{ p[0] }}</td>
+            <td>{{ p[1] }}</td>
+            <td>{{ p[2] }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    """
+    return render_with_layout("User Preferences", body, prefs=prefs)
 
 active_users = {}
 
@@ -407,6 +531,7 @@ REGISTER_TEMPLATE = '''
     <input name="username" placeholder="Username" required><br>
     <input name="email" placeholder="Email"><br>
     <input name="phone" placeholder="Phone"><br>
+    <input name="password" type="password" placeholder="Password" required><br>
     <button type="submit">Register</button>
 </form>
 <br>
@@ -431,22 +556,6 @@ PREFERENCES_TEMPLATE = '''
 <ul>
 {% for cat, pref, count in suggestions %}
     <li>{{ cat }} → {{ pref }} ({{ count }} users)</li>
-{% endfor %}
-</ul>
-'''
-
-ADMIN_TEMPLATE = '''
-<h2>Admin Dashboard</h2>
-<h3>Users</h3>
-<ul>
-{% for u in users %}
-    <li>{{ u[0] }} | {{ u[1] }} | {{ u[2] }}</li>
-{% endfor %}
-</ul>
-<h3>Preferences Summary</h3>
-<ul>
-{% for cat, pref, count in prefs %}
-    <li>{{ cat }}: {{ pref }} ({{ count }})</li>
 {% endfor %}
 </ul>
 '''
@@ -638,5 +747,6 @@ CHAT_TEMPLATE = '''
 </body>
 </html>
 '''
+
 if __name__ == '__main__':
-    socketio.run(app, debug=True)
+    app.run(debug=True)
