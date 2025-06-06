@@ -89,7 +89,7 @@ def get_random_captcha():
 @app.route("/captcha", methods=["GET", "POST"])
 def captcha():
     # If already verified, go directly to chatroom
-    if session.get("verified"):
+    if session.get("human_verified"):
         return redirect('/verify')
 
     error = None
