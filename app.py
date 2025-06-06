@@ -68,6 +68,90 @@ def home():
     session.clear()  # Restart everything on refresh
     return redirect('/captcha')
 
+BASE_LAYOUT_TEMPLATE = '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ title or "Chat Chat"  }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            background: linear-gradient(to right, #0f2027, #203a43, #2c5364);
+            font-family: Arial, sans-serif;
+            color: white;
+            text-align: center;
+            margin: 0;
+            padding: 40px;
+        }
+        .container {
+            animation: fadeIn 0.8s ease;
+            background: rgba(0,0,0,0.6);
+            padding: 30px;
+            border-radius: 10px;
+            max-width: 500px;
+            margin: auto;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        input, button {
+            padding: 10px;
+            border-radius: 5px;
+            border: none;
+            font-size: 16px;
+        }
+        input {
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+        }
+        button {
+            background: #2a9df4;
+            color: white;
+            cursor: pointer;
+        }
+        button:disabled {
+            background: #777;
+            cursor: not-allowed;
+        }
+        .error {
+            color: #ff6666;
+            font-weight: bold;
+        }
+        a {
+            color: #aad4ff;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes shake {
+            0% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            50% { transform: translateX(5px); }
+            75% { transform: translateX(-5px); }
+            100% { transform: translateX(0); }
+        }
+        .shake {
+            animation: shake 0.4s;
+        }
+    </style>
+</head>
+<body>
+    <div class="container {{ extra_class|default('') }}">
+        {{ content|safe }}
+    </div>
+</body>
+</html>
+'''
+
 # Define the CAPTCHA questions
 CAPTCHA_QUESTIONS = [
     {"question": "What color is the sky on a clear sunny day?", "answer": "blue"},
@@ -91,9 +175,7 @@ def captcha():
     # If already verified, go directly to chatroom
     if session.get("verified"):
         return redirect('/verify')
-
     error = None
-
     if request.method == "POST":
         user_answer = request.form.get("captcha", "").strip().lower()
         expected_answer = session.get("captcha_answer", "").lower()
@@ -108,16 +190,15 @@ def captcha():
     session["captcha_answer"] = question_obj["answer"]
 
     CAPTCHA_TEMPLATE = f'''
+    <h3>Verify you are human</h3>
+    <p>{question_obj["question"]}</p>
     <form method="POST">
-        <h3>Verify you are human</h3>
-        <p>{question_obj["question"]}</p>
         <input name="captcha" placeholder="Answer" required>
         <button type="submit">Verify</button>
         {"<p style='color:red'>" + error + "</p>" if error else ""}
     </form>
     '''
-
-    return render_template_string(CAPTCHA_TEMPLATE)
+    return render_template_string(BASE_LAYOUT_TEMPLATE, title="CAPTCHA", content=CAPTCHA_TEMPLATE, extra_class='shake')
 
 @app.route("/chatroom")
 def chatroom():
@@ -130,12 +211,33 @@ def chatroom():
 def verify():
     if not session.get('human_verified'):
         return redirect('/captcha')
+    error_html = ''
+    extra_class = ''
     if request.method == 'POST':
         if request.form.get('age_confirm') == 'on':
             session['age_verified'] = True
             return redirect('/auth')
-        return render_template_string("<h3>You must confirm age 18+</h3>" + AGE_TEMPLATE)
-    return render_template_string(AGE_TEMPLATE)
+        else:
+            error_html = "<p class='error'>You must confirm you are 18+ to continue.</p>"
+            extra_class = 'shake'
+    AGE_TEMPLATE = '''
+        <h3>Are you 18 or older?</h3>
+        <form method="POST">
+            <label>
+                <input type="checkbox" id="age_confirm" name="age_confirm" onchange="toggleButton()"> I confirm I am 18+
+            </label><br><br>
+            <button type="submit" id="continueBtn" disabled>Continue</button>
+        </form>
+
+    <script>
+        function toggleButton() {{
+            const checkbox = document.getElementById('age_confirm');
+            const button = document.getElementById('continueBtn');
+            button.disabled = !checkbox.checked;
+        }}
+    </script>
+    '''.format(error=error_html)
+    return render_template_string(BASE_LAYOUT_TEMPLATE, title="Age Verification", content=AGE_TEMPLATE, extra_class=extra_class )
 
 @app.route('/auth', methods=['GET', 'POST'])
 def auth():
@@ -149,7 +251,7 @@ def auth():
             return redirect('/login')
         elif action == 'register':
             return redirect('/register')
-    return render_template_string(AUTH_TEMPLATE)
+    return render_template_string(BASE_LAYOUT_TEMPLATE, title="Auth", content=AUTH_TEMPLATE, extra_class='shake')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -167,7 +269,7 @@ def login():
             if user:
                 session['user_id'] = user[0]
                 return redirect('/chat')
-    return render_template_string(LOGIN_TEMPLATE)
+    return render_template_string(BASE_LAYOUT_TEMPLATE, title="Login", content=LOGIN_TEMPLATE, extra_class='shake')
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -181,7 +283,7 @@ def register():
             uid = c.lastrowid
             session['user_id'] = uid
         return redirect('/preferences')
-    return render_template_string(REGISTER_TEMPLATE)
+    return render_template_string(BASE_LAYOUT_TEMPLATE, title="Register", content=REGISTER_TEMPLATE, extra_class='shake')
 
 @app.route('/preferences', methods=['GET', 'POST'])
 def preferences():
@@ -209,7 +311,7 @@ def preferences():
 
         return redirect('/chat')
     suggestions = get_preference_suggestions()
-    return render_template_string(PREFERENCES_TEMPLATE, suggestions=suggestions)
+    return render_template_string(PREFERENCES_TEMPLATE, suggestions=suggestions, extra_class='shake')
 
 @app.route('/admin')
 def admin():
@@ -220,10 +322,10 @@ def admin():
         c.execute("SELECT username, email, phone FROM users")
         users = c.fetchall()
         prefs = get_preference_suggestions()
-    return render_template_string(ADMIN_TEMPLATE, users=users, prefs=prefs)
+    return render_template_string(ADMIN_TEMPLATE, users=users, prefs=prefs, extra_class='shake')
 @app.route('/chat')
 def chat():
-    return render_template_string(CHAT_TEMPLATE, user_id=session.get('user_id'), is_admin=is_admin())
+    return render_template_string(CHAT_TEMPLATE, user_id=session.get('user_id'), is_admin=is_admin(), extra_class='shake')
 
 active_users = {}
 
@@ -277,14 +379,6 @@ def on_disconnect():
     global waiting_users
     waiting_users = [u for u in waiting_users if u[0] != request.sid]
 
-AGE_TEMPLATE = '''
-<form method="POST">
-    <h2>Are you 18 years or older?</h2>
-    <label><input type="checkbox" name="age_confirm"> I confirm I am 18+</label><br><br>
-    <button type="submit">Continue</button>
-</form>
-'''
-
 AUTH_TEMPLATE = '''
 <form method="POST">
     <h2>Welcome to Chat Chat</h2>
@@ -302,7 +396,9 @@ LOGIN_TEMPLATE = '''
     <button type="submit">Login</button>
 </form>
 <br>
-<a href="/chat" style="color: #2a9df4;">Back to Chat</a>
+<a href="/register">Don't have an account? Register →</a>
+<br>
+<a href="/chat" style="color: #2a9df4;">Chat as Guest</a>
 '''
 
 REGISTER_TEMPLATE = '''
@@ -314,7 +410,9 @@ REGISTER_TEMPLATE = '''
     <button type="submit">Register</button>
 </form>
 <br>
-<a href="/chat" style="color: #2a9df4;">Back to Chat</a>
+<a href="/login">Already have an account? Login →</a>
+<br>
+<a href="/chat" style="color: #2a9df4;">Chat as Guest</a>
 '''
 
 PREFERENCES_TEMPLATE = '''
@@ -469,7 +567,16 @@ CHAT_TEMPLATE = '''
 <body>
 <h2>Welcome to Chat Chat</h2>
 {% if not user_id %}
-    <a href="/login" style="color: #2a9df4;">Login</a>
+    <div style="margin-bottom: 15px;">
+        <a href="/login">
+            <button style="margin-right: 10px;">Login</button>
+        </a>
+        <a href="/register">
+            <button>Register</button>
+        </a>
+    </div>
+{% else %}
+    <p style="color: #aaa;">You are logged in.</p>
 {% endif %}
 <div id="chat-box"></div>
 <div id="typing"></div>
