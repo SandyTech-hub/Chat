@@ -89,7 +89,7 @@ def get_random_captcha():
 @app.route("/captcha", methods=["GET", "POST"])
 def captcha():
     # If already verified, go directly to chatroom
-    if session.get("human_verified"):
+    if session.get("verified"):
         return redirect('/verify')
 
     error = None
@@ -193,9 +193,20 @@ def preferences():
             c = conn.cursor()
             c.execute("DELETE FROM preferences WHERE user_id=?", (uid,))
             for category, pref_list in request.form.lists():
+                if category == "custom":
+                    continue  # We'll handle it separately
                 for pref in pref_list:
                     c.execute("INSERT INTO preferences (user_id, category, preference) VALUES (?, ?, ?)",
                               (uid, category, pref))
+
+            # Handle custom preferences (comma separated)
+            custom_input = request.form.get("custom", "").strip()
+            if custom_input:
+                custom_prefs = [p.strip() for p in custom_input.split(",") if p.strip()]
+                for cpref in custom_prefs:
+                    c.execute("INSERT INTO preferences (user_id, category, preference) VALUES (?, ?, ?)",
+                              (uid, 'custom', cpref))
+
         return redirect('/chat')
     suggestions = get_preference_suggestions()
     return render_template_string(PREFERENCES_TEMPLATE, suggestions=suggestions)
@@ -216,12 +227,34 @@ def chat():
 
 active_users = {}
 
+waiting_users = []  # Add this at the top of your file, near active_users
+
 @socketio.on('join')
-def on_join(data=None):
-    room_id = str(random.randint(10000, 99999))
-    join_room(room_id)
-    active_users[request.sid] = room_id
-    emit('partner-found', {'room': room_id})
+def on_join():
+    uid = session.get('user_id')
+    user_prefs = get_user_preferences(uid) if uid else {}
+
+    # Try to match with someone from waiting list
+    for other_sid, other_uid, other_prefs in waiting_users:
+        if other_sid == request.sid:
+            continue
+        # Calculate shared preferences
+        shared = 0
+        for category in user_prefs:
+            if category in other_prefs:
+                shared += len(set(user_prefs[category]) & set(other_prefs[category]))
+        if shared > 0:
+            room_id = str(random.randint(10000, 99999))
+            join_room(room_id)
+            join_room(room_id, sid=other_sid)
+            emit('partner-found', {'room': room_id}, room=room_id)
+            waiting_users.remove((other_sid, other_uid, other_prefs))
+            return
+
+    # No match found, wait
+    waiting_users.append((request.sid, uid, user_prefs))
+    emit('partner-found', {'room': None})
+
 
 @socketio.on('message')
 def on_message(data):
@@ -235,6 +268,14 @@ def on_typing(data):
 def on_skip(data):
     leave_room(data['room'])
     emit('partner-left', {}, room=data['room'])
+    global waiting_users
+    waiting_users = [u for u in waiting_users if u[0] != request.sid]
+    socketio.emit('join')  # Retry joining
+
+@socketio.on('disconnect')
+def on_disconnect():
+    global waiting_users
+    waiting_users = [u for u in waiting_users if u[0] != request.sid]
 
 AGE_TEMPLATE = '''
 <form method="POST">
@@ -280,7 +321,8 @@ PREFERENCES_TEMPLATE = '''
     <input name="interest" value="movies"> Movies<br>
     <input name="interest" value="books"> Books<br><br>
     <label>Custom Preferences:</label><br>
-    <input name="custom" placeholder="Write your own"><br>
+    <input name="custom" placeholder="e.g. anime, hiking, chess"><br>
+    <small>Separate multiple preferences with commas</small><br><br>
     <button type="submit">Save</button>
 </form>
 <br><h3>Suggestions:</h3>
