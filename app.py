@@ -231,12 +231,11 @@ def captcha():
     '''
     return render_template_string(BASE_LAYOUT_TEMPLATE, title="CAPTCHA", content=CAPTCHA_TEMPLATE, extra_class='shake')
 
-@app.route("/chatroom")
-def chatroom():
+@app.route('/chat')
+def chat():
     if not session.get("human_verified"):
-        return redirect("/captcha")  # Force verification before accessing chatroom
-    return redirect('/verify')
-
+        return redirect("/captcha")  # Ensure CAPTCHA passed
+    return render_template_string(CHAT_TEMPLATE, user_id=session.get('user_id'))
 
 @app.route('/verify', methods=['GET', 'POST'])
 def verify():
