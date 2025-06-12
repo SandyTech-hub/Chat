@@ -1,4 +1,4 @@
-from flask import Flask, request, session, redirect, render_template, render_template_string
+from flask import Flask, request, session, redirect, render_template, render_template_string, flash, get_flashed_messages
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from werkzeug.security import generate_password_hash
 import sqlite3, random, time
@@ -210,11 +210,15 @@ def captcha():
     if request.method == "POST":
         user_answer = request.form.get("captcha", "").strip().lower()
         expected_answer = session.get("captcha_answer", "").lower()
+        session['captcha_attempts'] = session.get('captcha_attempts', 0) + 1
         if user_answer == expected_answer:
             session["human_verified"] = True  # Mark as verified in the session
+            session.pop("captcha_attempts", None)  # Reset attempts on success
             return redirect("/verify")
         else:
             error = "Incorrect answer. Please try again."
+            if session['captcha_attempts'] >= 2:
+                error += " <br><small>Hint: Keep it simple and literal (e.g. 'blue', '4').</small>"
 
     # Ask a new question if it's a GET request or answer was wrong
     question_obj = get_random_captcha()
@@ -341,7 +345,7 @@ def preferences():
                 for cpref in custom_prefs:
                     c.execute("INSERT INTO preferences (user_id, category, preference) VALUES (?, ?, ?)",
                               (uid, 'custom', cpref))
-
+        flash("Preferences saved! Connecting you to a match...")
         return redirect('/chat')
     suggestions = get_preference_suggestions()
     return render_template_string(BASE_LAYOUT_TEMPLATE, title="Preferences", content=PREFERENCES_TEMPLATE, suggestions=suggestions, extra_class='shake')
@@ -459,7 +463,7 @@ def on_join():
     uid = session.get('user_id')
     user_prefs = get_user_preferences(uid) if uid else {}
 
-    # Try to match with someone from waiting list
+    # Try to match with someone already waiting
     for other_sid, other_uid, other_prefs in waiting_users:
         if other_sid == request.sid:
             continue
@@ -478,8 +482,7 @@ def on_join():
 
     # No match found, wait
     waiting_users.append((request.sid, uid, user_prefs))
-    emit('partner-found', {'room': None})
-
+    emit('partner-found', {'room': None})  # 🟢 Explicitly notify no match
 
 @socketio.on('message')
 def on_message(data):
@@ -515,13 +518,14 @@ LOGIN_TEMPLATE = '''
 <h2>Login</h2>
 <form method="POST">
     <input name="username" placeholder="Username" required><br>
-    <input name="password" type="password" placeholder="Password (admin only)" required><br>
+    <input name="password" type="password" placeholder="Password" required><br>
     <button type="submit">Login</button>
 </form>
 <br>
 <a href="/register">Don't have an account? Register →</a>
 <br>
-<a href="/chat" style="color: #2a9df4;">Chat as Guest</a>
+<p><small><strong>Login</strong> to save your preferences and connect with similar users. Or</small></p>
+<a href="/chat" style="color: #2a9df4;">Continue as Guest (no saved preferences)</a>
 '''
 
 REGISTER_TEMPLATE = '''
@@ -547,14 +551,22 @@ PREFERENCES_TEMPLATE = '''
     <input name="interest" value="movies"> Movies<br>
     <input name="interest" value="books"> Books<br><br>
     <label>Custom Preferences:</label><br>
-    <input name="custom" placeholder="e.g. anime, hiking, chess"><br>
-    <small>Separate multiple preferences with commas</small><br><br>
+    <input name="custom" placeholder="e.g. anime, hiking, cooking, sci-fi"><br>
+    <small>Separate multiple values with commas. These help match you with others who like the same things!</small><br><br>
     <button type="submit">Save</button>
 </form>
 <br><h3>Suggestions:</h3>
 <ul>
+{% set last_cat = None %}
 {% for cat, pref, count in suggestions %}
-    <li>{{ cat }} → {{ pref }} ({{ count }} users)</li>
+    {% if cat != last_cat %}
+        {% if not loop.first %}</ul>{% endif %}
+        <li><strong>{{ cat }}</strong>:
+        <ul>
+        {% set last_cat = cat %}
+    {% endif %}
+    <li>{{ pref }} ({{ count }} users)</li>
+    {% if loop.last %}</ul>{% endif %}
 {% endfor %}
 </ul>
 '''
@@ -674,6 +686,13 @@ CHAT_TEMPLATE = '''
 </head>
 <body>
 <h2>Welcome to Chat Chat</h2>
+{% with messages = get_flashed_messages() %}
+  {% if messages %}
+    <div style="color: #00ff99; font-weight: bold;">
+        {{ messages[0] }}
+    </div>
+  {% endif %}
+{% endwith %}
 {% if not user_id %}
     <div style="margin-bottom: 15px;">
         <a href="/login">
@@ -690,50 +709,78 @@ CHAT_TEMPLATE = '''
 <div id="typing"></div>
 <div class="bar">
     <button id="skip">Skip</button>
-    <input id="input" placeholder="Type a message...">
-    <button id="send">Send</button>
+    <input id="input" placeholder="Type a message..." disabled>
+    <button id="send" disabled>Send</button>
 </div>
 <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
 <script>
     const socket = io();
-    let room = '';
+    let room = ''; // Current room ID
+
+    // DOM elements
+    const input = document.getElementById('input');
+    const sendBtn = document.getElementById('send');
+    const skipBtn = document.getElementById('skip');
+
+    // Ask server to connect us
     socket.emit('join');
 
+    // When server finds a match
     socket.on('partner-found', data => {
+        console.log("Partner data received:", data);
         room = data.room;
-        append("System: Connected to a stranger", 'system');
+
+        if (room) {
+            append("System: Connected to a stranger", 'system');
+            input.disabled = false;      // Enable input
+            sendBtn.disabled = false;    // Enable Send button
+        } else {
+            append("System: Waiting for a match...", 'system');
+            input.disabled = true;       // Keep input disabled
+            sendBtn.disabled = true;     // Keep Send button disabled
+        }
     });
 
+    // Handle incoming messages
     socket.on('message', data => {
         append("Stranger: " + data.message, 'stranger');
     });
 
+    // Stranger is typing
     socket.on('typing', () => {
         document.getElementById('typing').innerText = "Stranger is typing...";
         setTimeout(() => document.getElementById('typing').innerText = "", 2000);
     });
 
-    document.getElementById('send').onclick = sendMsg;
-    document.getElementById('skip').onclick = () => {
-        socket.emit('skip', { room });
-        socket.emit('join');
-        document.getElementById('chat-box').innerHTML = '';
-    };
-
-    document.getElementById('input').addEventListener('keypress', e => {
-        if (e.key === 'Enter') sendMsg();
-        else socket.emit('typing', { room });
-    });
-
+    // Send message function
     function sendMsg() {
-        const val = document.getElementById('input').value;
-        if (val.trim()) {
+        const val = input.value;
+        if (val.trim() && room) {
             append("You: " + val, 'you');
             socket.emit('message', { message: val, room });
-            document.getElementById('input').value = '';
+            input.value = '';
         }
     }
 
+    // Event listeners
+    sendBtn.onclick = sendMsg;
+
+    input.addEventListener('keypress', e => {
+        if (e.key === 'Enter') sendMsg();
+        else if (room) socket.emit('typing', { room });  // Only emit typing if connected
+    });
+
+    skipBtn.onclick = () => {
+        socket.emit('skip', { room });     // Tell server to skip
+        socket.emit('join');               // Rejoin queue
+        document.getElementById('chat-box').innerHTML = '';  // Clear chat
+
+        // Disable input again until new partner is found
+        input.disabled = true;
+        sendBtn.disabled = true;
+    };
+
+    // Append messages to chat box
     function append(text, cls) {
         const div = document.createElement('div');
         div.innerText = text;
@@ -746,6 +793,5 @@ CHAT_TEMPLATE = '''
 </body>
 </html>
 '''
-
 if __name__ == '__main__':
     app.run(debug=True)
