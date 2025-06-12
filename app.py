@@ -709,9 +709,13 @@ CHAT_TEMPLATE = '''
 <div id="typing"></div>
 <div class="bar">
     <button id="skip">Skip</button>
-    <input id="input" placeholder="Type a message..." disabled>
-    <button id="send" disabled>Send</button>
 </div>
+
+<div class="bar chat-controls" style="display:none;">
+    <input id="input" placeholder="Type a message...">
+    <button id="send">Send</button>
+</div>
+
 <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
 <script>
     const socket = io();
