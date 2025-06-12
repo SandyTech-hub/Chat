@@ -465,9 +465,8 @@ def on_join():
 
     user_prefs = get_user_preferences(uid) if uid else {}
 
-    # Check if there's a waiting user
-    for other in waiting_users:
-        other_sid, other_uid, other_prefs = other
+    # Try to match with someone already waiting
+    for other_sid, other_uid, other_prefs in waiting_users:
         if other_sid == request.sid:
             continue
 
@@ -477,26 +476,26 @@ def on_join():
             if cat in other_prefs:
                 shared += len(set(user_prefs[cat]) & set(other_prefs[cat]))
 
-        if shared > 0:
+        # ✅ INSERT DEBUGGING LOGS HERE:
+        print(f"[MATCH CHECK] {request.sid} checking against {other_sid}")
+        print(f"Shared prefs: {shared}")
+        print(f"user_prefs: {user_prefs}")
+        print(f"other_prefs: {other_prefs}")
+
+        if shared > 0 or not uid or not other_uid:
+            # 👇 Add this logging:
+            print(f"[MATCH] {request.sid} matched with {other_sid}")
             room_id = str(random.randint(10000, 99999))
-
-            # Join both users to the same room
-            socketio.server.enter_room(request.sid, room_id)
-            socketio.server.enter_room(other_sid, room_id)
-
-            # Remove the matched user from waiting list
-            waiting_users.remove(other)
-
-            # Notify both users
+            join_room(room_id)
+            join_room(room_id, sid=other_sid)
             emit('partner-found', {'room': room_id}, room=room_id)
-            print(f"[MATCH] {request.sid} matched with {other_sid} in room {room_id}")
+            waiting_users.remove((other_sid, other_uid, other_prefs))
             return
 
-    # No match found; add this user to waiting list
+    # No match found
     waiting_users.append((request.sid, uid, user_prefs))
-    emit('partner-found', {'room': None})
     print(f"[WAITING] {request.sid} is waiting")
-
+    emit('partner-found', {'room': None})
 
 @socketio.on('message')
 def on_message(data):
@@ -741,8 +740,9 @@ CHAT_TEMPLATE = '''
     const input = document.getElementById('input');
     const sendBtn = document.getElementById('send');
 
-    socket.emit('join');
-
+    window.onload = () => {
+        socket.emit('join');
+    };
     socket.on('partner-found', data => {
         console.log("Partner-found data:", data);
         room = data && data.room;
@@ -774,7 +774,6 @@ CHAT_TEMPLATE = '''
     document.getElementById('send').onclick = sendMsg;
     document.getElementById('skip').onclick = () => {
         socket.emit('skip', { room });
-        socket.emit('join');
         document.getElementById('chat-box').innerHTML = '';
     };
 
