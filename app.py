@@ -715,44 +715,48 @@ CHAT_TEMPLATE = '''
 <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
 <script>
     const socket = io();
-    let room = ''; // Current room ID
-
-    // DOM elements
+    let room = '';
     const input = document.getElementById('input');
     const sendBtn = document.getElementById('send');
-    const skipBtn = document.getElementById('skip');
 
-    // Ask server to connect us
     socket.emit('join');
 
-    // When server finds a match
     socket.on('partner-found', data => {
-        console.log("Partner data received:", data);
-        room = data.room;
+        console.log("Partner-found data:", data);
+        room = data && data.room;
 
         if (room) {
             append("System: Connected to a stranger", 'system');
-            input.disabled = false;      // Enable input
-            sendBtn.disabled = false;    // Enable Send button
+            input.disabled = false;
+            sendBtn.disabled = false;
         } else {
             append("System: Waiting for a match...", 'system');
-            input.disabled = true;       // Keep input disabled
-            sendBtn.disabled = true;     // Keep Send button disabled
+            input.disabled = true;
+            sendBtn.disabled = true;
         }
     });
 
-    // Handle incoming messages
     socket.on('message', data => {
         append("Stranger: " + data.message, 'stranger');
     });
 
-    // Stranger is typing
     socket.on('typing', () => {
         document.getElementById('typing').innerText = "Stranger is typing...";
         setTimeout(() => document.getElementById('typing').innerText = "", 2000);
     });
 
-    // Send message function
+    document.getElementById('send').onclick = sendMsg;
+    document.getElementById('skip').onclick = () => {
+        socket.emit('skip', { room });
+        socket.emit('join');
+        document.getElementById('chat-box').innerHTML = '';
+    };
+
+    input.addEventListener('keypress', e => {
+        if (e.key === 'Enter') sendMsg();
+        else socket.emit('typing', { room });
+    });
+
     function sendMsg() {
         const val = input.value;
         if (val.trim() && room) {
@@ -762,25 +766,6 @@ CHAT_TEMPLATE = '''
         }
     }
 
-    // Event listeners
-    sendBtn.onclick = sendMsg;
-
-    input.addEventListener('keypress', e => {
-        if (e.key === 'Enter') sendMsg();
-        else if (room) socket.emit('typing', { room });  // Only emit typing if connected
-    });
-
-    skipBtn.onclick = () => {
-        socket.emit('skip', { room });     // Tell server to skip
-        socket.emit('join');               // Rejoin queue
-        document.getElementById('chat-box').innerHTML = '';  // Clear chat
-
-        // Disable input again until new partner is found
-        input.disabled = true;
-        sendBtn.disabled = true;
-    };
-
-    // Append messages to chat box
     function append(text, cls) {
         const div = document.createElement('div');
         div.innerText = text;
