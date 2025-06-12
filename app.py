@@ -729,12 +729,16 @@ CHAT_TEMPLATE = '''
         console.log("Partner-found data:", data);
         room = data && data.room;
 
+        const controls = document.querySelector('.chat-controls');
+
         if (room) {
             append("System: Connected to a stranger", 'system');
+            controls.style.display = 'flex';
             input.disabled = false;
             sendBtn.disabled = false;
         } else {
             append("System: Waiting for a match...", 'system');
+            controls.style.display = 'none';
             input.disabled = true;
             sendBtn.disabled = true;
         }
