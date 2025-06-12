@@ -510,9 +510,13 @@ def on_typing(data):
 def on_skip(data):
     leave_room(data['room'])
     emit('partner-left', {}, room=data['room'])
+
     global waiting_users
     waiting_users = [u for u in waiting_users if u[0] != request.sid]
-    on_join()  # Retry joining
+
+    print(f"[SKIP] {request.sid} skipped and left room {data['room']}")
+
+    on_join()  # Try matching again
 
 @socketio.on('disconnect')
 def on_disconnect():
