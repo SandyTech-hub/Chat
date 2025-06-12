@@ -5,7 +5,7 @@ import sqlite3, random, time
 
 app = Flask(__name__)
 app.secret_key = 'your_very_secure_secret'
-socketio = SocketIO(app)
+socketio = SocketIO(app, manage_session=False)
 DB_NAME = 'db.sqlite'
 
 # ---------- Layout Wrapper Function ----------
@@ -461,10 +461,12 @@ waiting_users = []  # Add this at the top of your file, near active_users
 @socketio.on('join')
 def on_join():
     uid = session.get('user_id')
+    print(f"[JOIN] {request.sid} - UID: {uid}")
     user_prefs = get_user_preferences(uid) if uid else {}
 
     # Try to match with someone already waiting
     for other_sid, other_uid, other_prefs in waiting_users:
+        print(f"Checking against {other_sid} (UID {other_uid})")
         if other_sid == request.sid:
             continue
         # Calculate shared preferences
@@ -474,8 +476,8 @@ def on_join():
                 shared += len(set(user_prefs[category]) & set(other_prefs[category]))
         if shared > 0:
             room_id = str(random.randint(10000, 99999))
-            join_room(room_id)
-            join_room(room_id, sid=other_sid)
+            socketio.server.enter_room(request.sid, room_id)
+            socketio.server.enter_room(other_sid, room_id)
             emit('partner-found', {'room': room_id}, room=room_id)
             waiting_users.remove((other_sid, other_uid, other_prefs))
             return
@@ -498,7 +500,7 @@ def on_skip(data):
     emit('partner-left', {}, room=data['room'])
     global waiting_users
     waiting_users = [u for u in waiting_users if u[0] != request.sid]
-    socketio.emit('join')  # Retry joining
+    on_join()  # Retry joining
 
 @socketio.on('disconnect')
 def on_disconnect():
