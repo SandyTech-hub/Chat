@@ -461,30 +461,42 @@ waiting_users = []  # Add this at the top of your file, near active_users
 @socketio.on('join')
 def on_join():
     uid = session.get('user_id')
-    print(f"[JOIN] {request.sid} - UID: {uid}")
+    print(f"[JOIN] {request.sid} (user_id={uid})")
+
     user_prefs = get_user_preferences(uid) if uid else {}
 
-    # Try to match with someone already waiting
-    for other_sid, other_uid, other_prefs in waiting_users:
-        print(f"Checking against {other_sid} (UID {other_uid})")
+    # Check if there's a waiting user
+    for other in waiting_users:
+        other_sid, other_uid, other_prefs = other
         if other_sid == request.sid:
             continue
+
         # Calculate shared preferences
         shared = 0
-        for category in user_prefs:
-            if category in other_prefs:
-                shared += len(set(user_prefs[category]) & set(other_prefs[category]))
+        for cat in user_prefs:
+            if cat in other_prefs:
+                shared += len(set(user_prefs[cat]) & set(other_prefs[cat]))
+
         if shared > 0:
             room_id = str(random.randint(10000, 99999))
+
+            # Join both users to the same room
             socketio.server.enter_room(request.sid, room_id)
             socketio.server.enter_room(other_sid, room_id)
+
+            # Remove the matched user from waiting list
+            waiting_users.remove(other)
+
+            # Notify both users
             emit('partner-found', {'room': room_id}, room=room_id)
-            waiting_users.remove((other_sid, other_uid, other_prefs))
+            print(f"[MATCH] {request.sid} matched with {other_sid} in room {room_id}")
             return
 
-    # No match found, wait
+    # No match found; add this user to waiting list
     waiting_users.append((request.sid, uid, user_prefs))
-    emit('partner-found', {'room': None})  # 🟢 Explicitly notify no match
+    emit('partner-found', {'room': None})
+    print(f"[WAITING] {request.sid} is waiting")
+
 
 @socketio.on('message')
 def on_message(data):
